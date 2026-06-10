@@ -1,9 +1,11 @@
-
-from sklearn.datasets import load_breast_cancer
+import numpy as np
+from scipy.stats import mode
+from sklearn.datasets import load_breast_cancer, load_wine, load_iris
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.tree import plot_tree
 import matplotlib.pyplot as plt
+from sklearn.ensemble import RandomForestClassifier
 
 data = load_breast_cancer()
 
@@ -67,4 +69,60 @@ plt.xlabel('alphas')
 plt.ylabel('accuracy')
 plt.grid(True)
 plt.show()
+
+B = 100
+trees = []
+for i in range(B):
+	train_idx = np.random.choice(len(X_train), len(X_train), replace=True)
+	X_boot = X_train[train_idx]
+	y_boot = y_train[train_idx]
+	tree = DecisionTreeClassifier()  # her iterasyonda YENİ ağaç
+	tree.fit(X_boot, y_boot)
+	trees.append(tree)
+
+predictions = np.array([tree.predict(X_test) for tree in trees])
+y_pred_bagging = mode(predictions, axis=0).mode
+accuracy_bagging = np.mean(y_pred_bagging == y_test)
+
+single_tree = DecisionTreeClassifier()
+single_tree.fit(X_train, y_train)
+accuracy_single = single_tree.score(X_test, y_test)
+
+print(f"Bagging accuracy: {accuracy_bagging}")
+print(f"Single tree accuracy: {accuracy_single}")
+
+datasets ={"Breast Canceer": load_breast_cancer(),
+           "Wine": load_wine(),
+            "Iris": load_iris(), }
+
+for name, data in datasets.items():
+	X = data.data
+	y = data.target
+	X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
 	
+	# Single Tree
+	single_tree = DecisionTreeClassifier()
+	single_tree.fit(X_train, y_train)
+	acc_single = single_tree.score(X_test, y_test)
+	
+	# Bagging
+	trees = []
+	for i in range(100):
+		train_idx = np.random.choice(len(X_train), len(X_train), replace=True)
+		X_boot = X_train[train_idx]
+		y_boot = y_train[train_idx]
+		tree = DecisionTreeClassifier()
+		tree.fit(X_boot, y_boot)
+		trees.append(tree)
+	predictions = np.array([tree.predict(X_test) for tree in trees])
+	acc_bagging = np.mean(mode(predictions, axis=0).mode == y_test)
+	
+	# Random Forest
+	rf = RandomForestClassifier()
+	rf.fit(X_train, y_train)
+	acc_rf = rf.score(X_test, y_test)
+	
+	print(f"\n=== {name} ===")
+	print(f"Single Tree   : {acc_single:.4f}")
+	print(f"Bagging       : {acc_bagging:.4f}")
+	print(f"Random Forest : {acc_rf:.4f}")
