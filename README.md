@@ -1242,3 +1242,248 @@ X_poly = poly.fit_transform(X)
 ---
 
 *Bu notlar AML dersinin tüm lablarını kapsamaktadır. Her lab için temel formüller, Python kodu ve teorik sorular derlenmiştir.*
+
+# 1. Veri Üretme
+
+## Normal Dağılım
+
+Formül: `x ~ N(μ, σ²)`
+
+```python
+# N(0,1) — ortalama 0, std 1
+x = np.random.randn(n)
+
+# N(mu, sigma^2) — ortalama mu, std sigma
+x = np.random.normal(loc=mu, scale=sigma, size=n)
+
+# Çok değişkenli normal — mean vektörü, kovaryans matrisi
+x = np.random.multivariate_normal(mean=[0, 0], cov=[[1, 0.5], [0.5, 1]], size=n)
+Bernoulli / Binomial
+Formül: y ~ Bern(p) — p olasılıkla 1, 1-p olasılıkla 0
+
+python
+# Tek atış — Bernoulli
+y = np.random.binomial(1, p, n)
+# 1 = kaç kez at (1 = Bernoulli)
+# p = başarı olasılığı (sayı veya array)
+# n = kaç gözlem üret
+
+# p bir array ise (her gözlem farklı olasılık):
+linear = X @ beta
+p = 1 / (1 + np.exp(-linear))   # sigmoid
+y = np.random.binomial(1, p, n)
+Logistic Model Veri Üretimi
+Formül: p_i = 1 / (1 + exp(-(β0 + β^T x_i))) , y_i ~ Bern(p_i)
+
+python
+n = 1000
+beta = np.array([1, 1, 1, 0, 0])   # gerçek katsayılar
+X = np.random.randn(n, 5)          # xi ~ N(0, I)
+
+linear = X @ beta                  # β^T * x -> (n,) vektör
+p = 1 / (1 + np.exp(-linear))      # sigmoid -> (n,) olasılıklar
+y = np.random.binomial(1, p, n)
+Probit Model Veri Üretimi
+Formül: p_i = Φ(β^T x_i) — Φ standart normal CDF
+
+python
+from scipy.stats import norm
+p = norm.cdf(X @ beta)   # Φ(β^T x)
+y = np.random.binomial(1, p, n)
+2. Model Fit Etme
+python
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+
+# Adım 1: Model oluştur
+model = LogisticRegression()
+
+# Adım 2: Eğit
+model.fit(X_train, y_train)
+
+# Adım 3: Tahmin et
+y_pred = model.predict(X_test)            # 0/1 etiket
+y_proba = model.predict_proba(X_test)[:, 1]  # olasılık
+
+# Adım 4: Değerlendir
+acc = model.score(X_test, y_test)
+# veya:
+acc = np.mean(y_pred == y_test)
+3. Accuracy / Hata Hesaplama
+python
+# Accuracy = doğru tahmin oranı
+acc = np.mean(y_pred == y_test)
+
+# Misclassification error = yanlış tahmin oranı
+error = np.mean(y_pred != y_test)
+
+# İkisi birbirinin tamamlayıcısı: error = 1 - acc
+4. Cross-Validation
+4a. cross_val_score
+python
+from sklearn.model_selection import cross_val_score
+
+# cv=10 → veriyi 10 parçaya böl, scoring='accuracy' → her parçada accuracy hesapla
+scores = cross_val_score(model, X, y, cv=10, scoring='accuracy')
+error = 1 - scores.mean()   # ortalama hata
+4b. Manuel Cross-Validation
+python
+from sklearn.model_selection import KFold
+
+kf = KFold(n_splits=10, shuffle=True, random_state=42)
+errors = []
+
+for train_idx, test_idx in kf.split(X):
+    X_tr, X_te = X[train_idx], X[test_idx]
+    y_tr, y_te = y[train_idx], y[test_idx]
+
+    model.fit(X_tr, y_tr)
+    error = np.mean(model.predict(X_te) != y_te)
+    errors.append(error)
+
+cv_error = np.mean(errors)
+4c. LogisticRegressionCV — Optimal Lambda Seçimi
+python
+from sklearn.linear_model import LogisticRegressionCV
+
+model_cv = LogisticRegressionCV(
+    Cs=np.logspace(-4, 4, 50),   # 50 farklı C değeri dener
+    cv=5,
+    solver='saga',
+    l1_ratios=[1],               # lasso için
+    max_iter=1000
+)
+model_cv.fit(X, y)
+
+best_C = model_cv.C_[0]
+best_lambda = 1 / best_C
+print(f"Optimal λ = {best_lambda:.4f}")
+print(f"Optimal C = {best_C:.4f}")
+5. Regularization
+Formüller
+Ridge (L2): Loss + λ Σ β_j²
+
+Lasso (L1): Loss + λ Σ |β_j|
+
+Elastic Net: Loss + λ [ α Σ|β_j| + (1-α) Σ β_j² ]
+
+Sklearn'de C ve λ ilişkisi
+C = 1/λ → C büyük = λ küçük = az ceza
+
+python
+# Ridge (L2)
+model_ridge = LogisticRegression(l1_ratio=0, C=1.0, solver='saga')
+
+# Lasso (L1)
+model_lasso = LogisticRegression(l1_ratio=1, C=1.0, solver='saga')
+
+# Elastic Net (%50 L1 + %50 L2)
+model_enet = LogisticRegression(l1_ratio=0.5, C=1.0, solver='saga')
+
+# C değerlerini dene
+for C in [0.001, 0.01, 0.1, 1, 10, 100]:
+    model = LogisticRegression(l1_ratio=1, C=C, solver='saga')
+    model.fit(X_train, y_train)
+    n_nonzero = np.sum(model.coef_[0] != 0)
+    print(f"C={C:6.3f} → λ={1/C:8.3f} → sıfır olmayan katsayı: {n_nonzero}")
+C ve Lambda etkisi özet:
+
+C=0.001 → λ=1000 → çok ceza → neredeyse tüm katsayılar sıfır
+
+C=0.01 → λ=100 → çok ceza → az katsayı hayatta
+
+C=0.1 → λ=10 → orta ceza
+
+C=1.0 → λ=1 → varsayılan
+
+C=10 → λ=0.1 → az ceza → daha fazla katsayı
+
+C=100 → λ=0.01 → çok az ceza → neredeyse cezasız
+
+6. Karar Sınırı Çizme
+python
+# Adım 1: Ekranı grid ile kapla
+x1_min, x1_max = X[:, 0].min() - 0.5, X[:, 0].max() + 0.5
+x2_min, x2_max = X[:, 1].min() - 0.5, X[:, 1].max() + 0.5
+
+xx, yy = np.meshgrid(
+    np.linspace(x1_min, x1_max, 300),
+    np.linspace(x2_min, x2_max, 300)
+)
+
+# Adım 2: Grid noktalarını modele ver
+grid = np.column_stack([xx.ravel(), yy.ravel()])
+
+# Adım 3: Tahmin
+Z = model.predict(grid)
+Z = Z.reshape(xx.shape)
+
+# Adım 4: Çiz
+plt.contourf(xx, yy, Z, alpha=0.3, cmap='RdBu')
+plt.contour(xx, yy, Z, levels=[0.5], colors='black')
+7. Support Vectors (SVM)
+python
+from sklearn.svm import SVC
+
+svm = SVC(kernel='linear', C=1.0)
+svm.fit(X_train, y_train)
+
+sv = svm.support_vectors_          # koordinatları
+n_sv = sv.shape[0]                 # kaç tane
+
+plt.scatter(sv[:, 0], sv[:, 1], s=100, facecolors='none', edgecolors='green')
+
+# Karar sınırı ve margin
+Z_df = svm.decision_function(grid).reshape(xx.shape)
+plt.contour(xx, yy, Z_df, levels=[-1, 0, 1],
+            colors=['blue', 'black', 'red'], linestyles=['--', '-', '--'])
+C parametresi etkisi:
+
+python
+for C in [0.01, 0.1, 1, 10, 100]:
+    svm = SVC(kernel='linear', C=C)
+    svm.fit(X_train, y_train)
+    print(f"C={C:6.2f} → Support vector sayısı: {svm.support_vectors_.shape[0]}")
+# C küçük → geniş margin → çok support vector
+# C büyük → dar margin → az support vector
+8. Feature Importance (Katsayılar)
+python
+coef = model.coef_[0]   # her değişken için bir katsayı
+
+plt.bar(range(len(coef)), coef)
+plt.xlabel('Feature index')
+plt.ylabel('Coefficient value')
+plt.title('Feature Importance (Logistic Regression Coefficients)')
+plt.show()
+
+n_nonzero = np.sum(coef != 0)
+print(f"Sıfır olmayan katsayı sayısı: {n_nonzero}")
+9. Overfitting Tespiti
+python
+train_acc = model.score(X_train, y_train)
+test_acc = model.score(X_test, y_test)
+
+print(f"Train accuracy: {train_acc:.4f}")
+print(f"Test accuracy: {test_acc:.4f}")
+print(f"Fark: {train_acc - test_acc:.4f}")
+
+# Yorum:
+# Fark < 0.02 → iyi, overfitting yok
+# Fark 0.02-0.1 → dikkatli ol
+# Fark > 0.1 → overfitting var!
+10. Hoca Formül Verirse Ne Yaparsın?
+Olasılık mı? → sigmoid veya norm.cdf
+
+Loss/Cost fonksiyonu mu? → LogisticRegressionCV ile minimize et
+
+Metrik mi (PSR, FDR, MSE)? → elle hesapla:
+
+python
+mse = np.mean((y_pred - y_true) ** 2)
+psr = len(selected & true_relevant) / len(true_relevant)
+fdr = len(selected - true_relevant) / len(selected)
+Regularization terimi mi? → LogisticRegression(l1_ratio=..., C=...)
+
+Σ veya E var mı? → np.sum(...) veya np.mean(...)
