@@ -85,21 +85,20 @@ for C in C_values:
 	# Sonuç: tüm katsayılar küçülür ama HİÇBİRİ tam sıfır olmaz
 	# Ne zaman kullanılır: tüm değişkenler biraz önemliyse
 	#
-	# penalty='l2': ridge regularization
+	# l1_ratio=0: tamamen L2 cezası (ridge)
 	# C=C: şu anki lambda değeri (C = 1/lambda)
 	# solver='saga': büyük ve seyrek veri setleri için hızlı algoritma
-	# max_iter=5000: modelin yakınsaması için maksimum iterasyon sayısı
-	#   (yeterli iterasyon olmazsa model yakınsamaz ve uyarı verir)
+	# max_iter=10000: modelin yakınsaması için maksimum iterasyon sayısı
+	# tol=0.01: tolerans — katsayılar bu kadar değişmiyorsa dur
 	
-	# RIDGE: l1_ratio=0 → tamamen L2 cezası
 	model_ridge = LogisticRegression(
-		l1_ratio=0, C=C, solver='saga', max_iter=5000
+		l1_ratio=0, C=C, solver='saga', max_iter=10000, tol=0.01
 	)
 	model_ridge.fit(X_scaled, y)
-	coefs_ridge.append(model_ridge.coef_[0])
 	
 	# coef_: fit edilen katsayılar, shape: (1, 6033) — 1 sınıf, 6033 gen
 	# coef_[0]: ilk (ve tek) satırı al → (6033,) vektör
+	coefs_ridge.append(model_ridge.coef_[0])
 	
 	# -------------------------------------------------------
 	# LASSO (L1 Regularization)
@@ -111,7 +110,7 @@ for C in C_values:
 	#   6033 genden sadece birkaçı kanserle ilgiliyse lasso onları bulur
 	
 	model_lasso = LogisticRegression(
-		l1_ratio=1, C=C, solver='saga', max_iter=5000
+		l1_ratio=1, C=C, solver='saga', max_iter=10000, tol=0.01
 	)
 	model_lasso.fit(X_scaled, y)
 	coefs_lasso.append(model_lasso.coef_[0])
@@ -127,7 +126,7 @@ for C in C_values:
 	# Ne zaman kullanılır: birbiriyle ilişkili genler varsa
 	
 	model_enet = LogisticRegression(
-		l1_ratio=0.5, C=C, solver='saga', max_iter=5000
+		l1_ratio=0.5, C=C, solver='saga', max_iter=10000, tol=0.01
 	)
 	model_enet.fit(X_scaled, y)
 	coefs_enet.append(model_enet.coef_[0])
@@ -202,7 +201,8 @@ for l1_ratio, name in [
 		Cs=C_values,
 		cv=5,
 		solver='saga',
-		max_iter=5000
+		max_iter=10000,
+		tol=0.01
 	)
 	model_cv.fit(X_scaled, y)
 	best_C = model_cv.C_[0]
@@ -246,14 +246,14 @@ def compute_psr_fdr(selected, true_relevant):
 	
 	return psr, fdr
 
-def run_lasso_simulation(n, n_irrelevant=10, L=100, probit=False):
+def run_lasso_simulation(n, n_irrelevant=10, L=20, probit=False):
 	"""
 	n           : kaç gözlem (hasta) üretileceği
 				  n büyük → daha fazla veri → model daha iyi öğrenir
 	n_irrelevant: kaç tane önemsiz (gürültü) değişken olacağı
 				  n_irrelevant büyük → model daha zor önemliyi bulur
 	L           : kaç kez tekrar edeceğiz
-				  L=100 → 100 farklı rastgele veri seti üret, ortalamasını al
+				  L=20 → 20 farklı rastgele veri seti üret, ortalamasını al
 	probit      : veri üretim modeli
 				  False → logistic model: p = 1/(1+exp(-β^T x))
 				  True  → probit model: p = Φ(β^T x)
@@ -309,13 +309,15 @@ def run_lasso_simulation(n, n_irrelevant=10, L=100, probit=False):
 		
 		# Lasso ile fit et, cross-validation ile optimal lambda seç
 		# LogisticRegressionCV: farklı C değerlerini dener, cross-validation ile en iyisini seçer
+		# l1_ratios=[1]: tamamen lasso (l1_ratio=1)
 		# np.logspace(-3, 2, 30): 0.001 ile 100 arasında 30 C değeri
 		model = LogisticRegressionCV(
-			penalty='l1',
+			l1_ratios=[1],                      # lasso: tamamen L1 cezası
 			solver='saga',
 			Cs=np.logspace(-3, 2, 30),
 			cv=5,
-			max_iter=5000
+			max_iter=10000,
+			tol=0.01
 		)
 		model.fit(X_sim, y_sim)
 		
@@ -345,7 +347,7 @@ psr_n = []
 fdr_n = []
 
 for n in n_values:
-	psr, fdr = run_lasso_simulation(n=n, n_irrelevant=10, L=100)
+	psr, fdr = run_lasso_simulation(n=n, n_irrelevant=10, L=20)
 	psr_n.append(psr)
 	fdr_n.append(fdr)
 	print(f"n={n:5d}: PSR={psr:.3f}, FDR={fdr:.3f}")
@@ -375,7 +377,7 @@ psr_k = []
 fdr_k = []
 
 for k in irrelevant_values:
-	psr, fdr = run_lasso_simulation(n=300, n_irrelevant=k, L=100)
+	psr, fdr = run_lasso_simulation(n=300, n_irrelevant=k, L=20)
 	psr_k.append(psr)
 	fdr_k.append(fdr)
 	print(f"k={k:5d}: PSR={psr:.3f}, FDR={fdr:.3f}")
@@ -401,10 +403,10 @@ plt.show()
 print("\n=== Logistic vs Probit karşılaştırması (n=300, k=10) ===")
 
 psr_log, fdr_log = run_lasso_simulation(
-	n=300, n_irrelevant=10, L=100, probit=False   # doğru model
+	n=300, n_irrelevant=10, L=20, probit=False   # doğru model
 )
 psr_pro, fdr_pro = run_lasso_simulation(
-	n=300, n_irrelevant=10, L=100, probit=True    # yanlış model (probit veri, logistic fit)
+	n=300, n_irrelevant=10, L=20, probit=True    # yanlış model (probit veri, logistic fit)
 )
 
 print(f"Logistic (doğru model) : PSR={psr_log:.3f}, FDR={fdr_log:.3f}")
