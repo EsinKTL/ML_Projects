@@ -5,109 +5,93 @@ from sklearn.linear_model import LogisticRegression, LogisticRegressionCV
 from sklearn.preprocessing import StandardScaler
 from scipy.stats import norm
 
-# =============================================================
-# VERİ YÜKLEME
-# =============================================================
-
-# pd.read_csv: metin dosyasını okuyup tablo (DataFrame) oluşturur
-# sep=r'\s+': sütunlar arasındaki ayraç boşluk veya tab karakteri
-# index_col=0: ilk sütun satır numarası, veri değil — onu indeks yap
-
 y_df = pd.read_csv('prostate_y.txt', sep=r'\s+', index_col=0)
 X_df = pd.read_csv('prostate_x.txt', sep=r'\s+', index_col=0)
 
-# .values: pandas DataFrame'i numpy array'e çevirir
-# .ravel(): 2 boyutlu [[0],[1],[0],...] diziyi 1 boyutlu [0,1,0,...] yapar
-# y sonuç: (102,) — 102 hastanın etiketi: 0=sağlıklı, 1=kanserli
+# .values: converts pandas DataFrame to numpy array
+# .ravel(): converts 2D array like [[0],[1],[0],...] to 1D [0,1,0,...]
+# y result: (102,) — labels of 102 patients: 0=healthy, 1=cancer
 y = y_df.values.ravel()
 
-# X sonuç: (102, 6033) — 102 hasta, 6033 gen
+# X result: (102, 6033) — 102 patients, 6033 genes
 X = X_df.values
 
-print("X boyutu:", X.shape)   # (102, 6033) olmalı
-print("y boyutu:", y.shape)   # (102,) olmalı
+print("X shape:", X.shape)   # should be (102, 6033)
+print("y shape:", y.shape)   # should be (102,)
 
-# =============================================================
-# VERİYİ STANDARTLAŞTIRMA — NEDEN GEREKLİ?
-# =============================================================
-
-# Regularization her katsayıya eşit ceza uygulamak ister.
-# Ama genler farklı ölçeklerde olabilir:
-#   gen_1: değerler 0.001 ile 0.002 arasında
-#   gen_2: değerler 100 ile 200 arasında
-# Bu durumda aynı katsayı cezası haksız olur.
-# StandardScaler her geni şöyle dönüştürür:
-#   yeni_değer = (eski_değer - ortalama) / standart_sapma
-# Sonuç: her genin ortalaması 0, standart sapması 1 olur
+# Regularization wants to apply equal penalty to each coefficient.
+# But genes may be on different scales:
+#   gene_1: values between 0.001 and 0.002
+#   gene_2: values between 100 and 200
+# Applying the same penalty would be unfair.
+# StandardScaler transforms each gene as:
+#   new_value = (old_value - mean) / standard_deviation
+# Result: each gene has mean 0 and standard deviation 1
 
 scaler = StandardScaler()
 
-# fit_transform: önce ortalama ve std hesaplar (fit), sonra dönüştürür (transform)
+# fit_transform: first computes mean and std (fit), then transforms (transform)
 X_scaled = scaler.fit_transform(X)
 
-# =============================================================
-# LAMBDA DEĞERLERİ — NEDEN LOG ÖLÇEĞINDE?
-# =============================================================
+# LAMBDA VALUES — WHY LOG SCALE?
 
-# sklearn'de regularization gücü C parametresiyle kontrol edilir
-# C = 1/λ ilişkisi var:
-#   C büyük → λ küçük → az ceza → katsayılar büyük olabilir
-#   C küçük → λ büyük → çok ceza → katsayılar sıfıra yaklaşır
+# In sklearn, regularization strength is controlled by parameter C
+# Relation: C = 1/λ
+#   Large C → small λ → weak penalty → coefficients can be large
+#   Small C → large λ → strong penalty → coefficients shrink toward zero
 #
 # np.logspace(-4, 2, 50):
-#   10^(-4) = 0.0001 ile 10^2 = 100 arasında
-#   50 eşit aralıklı değer üretir AMA log ölçeğinde
-#   yani: 0.0001, 0.0002, ..., 1, 2, ..., 100
-#   neden log ölçeği? çünkü lambda'nın etkisi log ölçeğinde düzgün görünür
+#   generates 50 equally spaced values between 10^(-4)=0.0001 and 10^2=100
+#   BUT on a log scale
+#   i.e., 0.0001, 0.0002, ..., 1, 2, ..., 100
+#   Why log scale? Because the effect of λ appears more uniform on log scale
 
-C_values = np.logspace(-4, 2, 50)   # 50 farklı C değeri
-lambdas = 1 / C_values              # C → lambda dönüşümü
+C_values = np.logspace(-4, 2, 50)   # 50 different C values
+lambdas = 1 / C_values              # C → λ conversion
 
-# =============================================================
-# TASK 1: RIDGE, LASSO, ELASTIC NET MODELLERİ
-# =============================================================
+# TASK 1: RIDGE, LASSO, ELASTIC NET MODELS
 
-# Her regularization için her lambda değerindeki katsayıları saklayacağız
-# Başlangıçta boş liste, döngüde dolduracağız
-# coefs_ridge[i] → i. lambda değerindeki 6033 katsayı
+# We will store coefficients for each regularization type at every λ
+# Start with empty lists, fill them in the loop
+# coefs_ridge[i] → the 6033 coefficients at i-th λ value
 
-coefs_ridge = []   # ridge katsayıları: her lambda için bir satır
-coefs_lasso = []   # lasso katsayıları
-coefs_enet  = []   # elastic net katsayıları
+coefs_ridge = []   # ridge coefficients: one row per λ
+coefs_lasso = []   # lasso coefficients
+coefs_enet  = []   # elastic net coefficients
 
 for C in C_values:
 	
 	# -------------------------------------------------------
 	# RIDGE (L2 Regularization)
 	# -------------------------------------------------------
-	# Ne yapar: her katsayının KARESİNİ cezalandırır
-	# Formül: Loss + λ * Σ(βj²)
-	# Sonuç: tüm katsayılar küçülür ama HİÇBİRİ tam sıfır olmaz
-	# Ne zaman kullanılır: tüm değişkenler biraz önemliyse
+	# What it does: penalizes the SQUARE of each coefficient
+	# Formula: Loss + λ * Σ(βj²)
+	# Result: all coefficients shrink but NONE becomes exactly zero
+	# When to use: when all variables are somewhat important
 	#
-	# l1_ratio=0: tamamen L2 cezası (ridge)
-	# C=C: şu anki lambda değeri (C = 1/lambda)
-	# solver='saga': büyük ve seyrek veri setleri için hızlı algoritma
-	# max_iter=10000: modelin yakınsaması için maksimum iterasyon sayısı
-	# tol=0.01: tolerans — katsayılar bu kadar değişmiyorsa dur
+	# l1_ratio=0: pure L2 penalty (ridge)
+	# C=C: current λ value (C = 1/λ)
+	# solver='saga': fast algorithm for large and sparse datasets
+	# max_iter=10000: maximum iterations for convergence
+	# tol=0.01: tolerance — stop if coefficients change less than this
 	
 	model_ridge = LogisticRegression(
 		l1_ratio=0, C=C, solver='saga', max_iter=10000, tol=0.01
 	)
 	model_ridge.fit(X_scaled, y)
 	
-	# coef_: fit edilen katsayılar, shape: (1, 6033) — 1 sınıf, 6033 gen
-	# coef_[0]: ilk (ve tek) satırı al → (6033,) vektör
+	# coef_: fitted coefficients, shape: (1, 6033) — 1 class, 6033 genes
+	# coef_[0]: take the first (and only) row → (6033,) vector
 	coefs_ridge.append(model_ridge.coef_[0])
 	
 	# -------------------------------------------------------
 	# LASSO (L1 Regularization)
 	# -------------------------------------------------------
-	# Ne yapar: her katsayının MUTLAK DEĞERİNİ cezalandırır
-	# Formül: Loss + λ * Σ|βj|
-	# Sonuç: bazı katsayılar TAM SIFIR olur → değişken seçimi yapar
-	# Ne zaman kullanılır: az sayıda değişken gerçekten önemliyse
-	#   6033 genden sadece birkaçı kanserle ilgiliyse lasso onları bulur
+	# What it does: penalizes the ABSOLUTE VALUE of each coefficient
+	# Formula: Loss + λ * Σ|βj|
+	# Result: some coefficients become EXACTLY zero → variable selection
+	# When to use: when only a few variables are truly important
+	#   If only a few genes are relevant for cancer, lasso finds them
 	
 	model_lasso = LogisticRegression(
 		l1_ratio=1, C=C, solver='saga', max_iter=10000, tol=0.01
@@ -116,14 +100,14 @@ for C in C_values:
 	coefs_lasso.append(model_lasso.coef_[0])
 	
 	# -------------------------------------------------------
-	# ELASTIC NET (L1 + L2 Karışımı)
+	# ELASTIC NET (L1 + L2 Mixture)
 	# -------------------------------------------------------
-	# Ne yapar: hem L1 hem L2 cezası uygular
-	# Formül: Loss + λ * [l1_ratio * Σ|βj| + (1-l1_ratio) * Σβj²]
-	# l1_ratio=0.5: %50 lasso + %50 ridge
-	# Sonuç: lasso gibi sıfır yapar AMA correlated (birbirine bağlı)
-	#   değişkenleri birlikte tutar (lasso bunlardan birini atar)
-	# Ne zaman kullanılır: birbiriyle ilişkili genler varsa
+	# What it does: applies both L1 and L2 penalties
+	# Formula: Loss + λ * [l1_ratio * Σ|βj| + (1-l1_ratio) * Σβj²]
+	# l1_ratio=0.5: 50% lasso + 50% ridge
+	# Result: creates sparsity like lasso BUT keeps correlated
+	#   variables together (lasso would discard one of them)
+	# When to use: when there are correlated genes
 	
 	model_enet = LogisticRegression(
 		l1_ratio=0.5, C=C, solver='saga', max_iter=10000, tol=0.01
@@ -131,31 +115,29 @@ for C in C_values:
 	model_enet.fit(X_scaled, y)
 	coefs_enet.append(model_enet.coef_[0])
 
-# np.array: listeyi numpy matrise çevirir
-# Sonuç: (50, 6033) — 50 lambda değeri, her biri için 6033 katsayı
+# np.array: convert list to numpy matrix
+# Result: (50, 6033) — 50 λ values, each with 6033 coefficients
 coefs_ridge = np.array(coefs_ridge)
 coefs_lasso = np.array(coefs_lasso)
 coefs_enet  = np.array(coefs_enet)
 
-# En büyük lambda'da (en çok ceza) kaç katsayı sıfır değil?
-# np.sum(... != 0): sıfır olmayan elemanları say
-print("\n=== En büyük lambda'da sıfır olmayan katsayı sayısı ===")
-print(f"Ridge      : {np.sum(coefs_ridge[-1] != 0)}")  # -1: son eleman = en büyük lambda
+# At the largest λ (most penalty), how many coefficients are non-zero?
+# np.sum(... != 0): count non-zero elements
+print("\n=== Number of non-zero coefficients at largest λ ===")
+print(f"Ridge      : {np.sum(coefs_ridge[-1] != 0)}")  # -1: last element = largest λ
 print(f"Lasso      : {np.sum(coefs_lasso[-1] != 0)}")
 print(f"Elastic Net: {np.sum(coefs_enet[-1]  != 0)}")
 
-# =============================================================
 # TASK 1: PROFILE PLOTS
-# =============================================================
 
-# Profile plot: her genin katsayısı lambda'ya göre nasıl değişiyor?
-# x ekseni: log10(lambda) — lambda değerleri
-# y ekseni: katsayı değeri
-# Her çizgi: bir genin katsayısının lambda'ya göre değişimi
+# Profile plot: how does the coefficient of each gene change with λ?
+# x-axis: log10(λ) — λ values
+# y-axis: coefficient value
+# Each line: coefficient path of one gene across λ
 #
-# 6033 gen çok fazla görsel için, sadece ilk 20 geni çiziyoruz
-# plt.subplots(1, 3): yan yana 3 grafik
-# figsize=(18, 6): grafik boyutu (genişlik, yükseklik) inç cinsinden
+# 6033 genes are too many for a plot; we only plot the first 20 genes
+# plt.subplots(1, 3): three plots side by side
+# figsize=(18, 6): figure size (width, height) in inches
 
 fig, axes = plt.subplots(1, 3, figsize=(18, 6))
 
@@ -165,31 +147,29 @@ for ax, coefs, title in zip(
 		['Ridge (L2)', 'Lasso (L1)', 'Elastic Net']
 ):
 	for j in range(20):
-		# coefs[:, j]: j. genin tüm lambda değerlerindeki katsayıları
-		# np.log10(lambdas): lambda'yı log ölçeğinde göster
+		# coefs[:, j]: coefficients of j-th gene across all λ
+		# np.log10(lambdas): show λ on log scale
 		ax.plot(np.log10(lambdas), coefs[:, j])
 	
-	# y=0 yatay çizgisi: katsayının sıfır olduğu noktayı gösterir
+	# y=0 horizontal line: shows where coefficient is zero
 	ax.axhline(y=0, color='black', linestyle='--', linewidth=0.8)
-	ax.set_xlabel('log10(λ) — lambda büyüdükçe ceza artar')
-	ax.set_ylabel('Katsayı değeri')
+	ax.set_xlabel('log10(λ) — penalty increases as λ grows')
+	ax.set_ylabel('Coefficient value')
 	ax.set_title(title)
 	ax.grid(True)
 
-plt.suptitle('Profile Plots: Katsayılar λ ile nasıl değişiyor?')
+plt.suptitle('Profile Plots: How coefficients change with λ')
 plt.tight_layout()
 plt.show()
 
-# =============================================================
-# TASK 1: CROSS-VALIDATION İLE OPTİMAL LAMBDA
-# =============================================================
+# TASK 1: CROSS-VALIDATION TO FIND OPTIMAL λ
 
-# Cross-validation: hangi lambda en iyi tahmin yapar?
-# cv=5: veriyi 5 parçaya böl, her parçayı test olarak kullan
-# LogisticRegressionCV: farklı C değerlerini dener, en iyisini seçer
-# Cs=C_values: denenecek C (=1/lambda) değerleri
+# Cross-validation: which λ gives the best predictions?
+# cv=5: split data into 5 folds, use each fold as test
+# LogisticRegressionCV: tries different C values, selects the best
+# Cs=C_values: the C (=1/λ) values to try
 
-print("\n=== Cross-validation ile optimal lambda ===")
+print("\n=== Optimal λ via cross-validation ===")
 
 for l1_ratio, name in [
 	(0,   'Ridge'),
@@ -209,110 +189,108 @@ for l1_ratio, name in [
 	best_lambda = 1 / best_C
 	print(f"\n{name}:")
 	print(f"  Optimal λ = {best_lambda:.6f}")
-	print(f"  Sıfır olmayan katsayı sayısı: {np.sum(model_cv.coef_[0] != 0)}")
+	print(f"  Number of non-zero coefficients: {np.sum(model_cv.coef_[0] != 0)}")
 
-# =============================================================
-# TASK 2: SİMÜLE VERİ İLE LASSO PERFORMANSI
-# =============================================================
+# TASK 2: LASSO PERFORMANCE ON SIMULATED DATA
 
-# PSR ve FDR hesaplama fonksiyonu
+# Function to compute PSR and FDR
 def compute_psr_fdr(selected, true_relevant):
 	"""
-	selected     : modelin seçtiği değişkenlerin indeks seti, örn: {0, 2, 5}
-	true_relevant: gerçekten önemli değişkenlerin indeks seti, örn: {0,1,...,9}
+	selected     : set of indices of variables selected by the model, e.g., {0, 2, 5}
+	true_relevant: set of indices of truly relevant variables, e.g., {0,1,...,9}
 
 	PSR (Positive Selection Rate):
-		Gerçek önemli değişkenlerin kaçını bulduk?
-		Örnek: 10 önemli değişkenden 7'sini bulduk → PSR = 7/10 = 0.7
-		PSR yüksek olmalı (1'e yakın)
+		How many of the truly relevant variables did we find?
+		Example: 7 out of 10 relevant variables found → PSR = 7/10 = 0.7
+		PSR should be high (close to 1)
 
 	FDR (False Discovery Rate):
-		Seçtiğimiz değişkenlerin kaçı aslında önemsiz?
-		Örnek: 10 değişken seçtik, 3'ü aslında önemsiz → FDR = 3/10 = 0.3
-		FDR düşük olmalı (0'a yakın)
+		Among the selected variables, how many are actually irrelevant?
+		Example: selected 10 variables, 3 are actually irrelevant → FDR = 3/10 = 0.3
+		FDR should be low (close to 0)
 
-	& operatörü: iki setin kesişimi (her ikisinde de olanlar)
-	- operatörü: fark (birincide olup ikincide olmayanlar)
+	& operator: intersection of two sets (elements in both)
+	- operator: set difference (elements in first but not in second)
 	"""
 	selected = set(selected)
 	if len(selected) == 0:
-		return 0.0, 0.0   # hiç değişken seçilmediyse PSR=0, FDR=0
+		return 0.0, 0.0   # if no variable selected, PSR=0, FDR=0
 	
-	# |seçilen ∩ gerçek| / |gerçek|
+	# |selected ∩ true_relevant| / |true_relevant|
 	psr = len(selected & true_relevant) / len(true_relevant)
 	
-	# |seçilen - gerçek| / |seçilen|
+	# |selected - true_relevant| / |selected|
 	fdr = len(selected - true_relevant) / len(selected)
 	
 	return psr, fdr
 
 def run_lasso_simulation(n, n_irrelevant=10, L=20, probit=False):
 	"""
-	n           : kaç gözlem (hasta) üretileceği
-				  n büyük → daha fazla veri → model daha iyi öğrenir
-	n_irrelevant: kaç tane önemsiz (gürültü) değişken olacağı
-				  n_irrelevant büyük → model daha zor önemliyi bulur
-	L           : kaç kez tekrar edeceğiz
-				  L=20 → 20 farklı rastgele veri seti üret, ortalamasını al
-	probit      : veri üretim modeli
+	n           : number of observations (patients) to generate
+				  larger n → more data → model learns better
+	n_irrelevant: number of irrelevant (noise) variables
+				  larger n_irrelevant → harder to find the relevant ones
+	L           : number of repetitions
+				  L=20 → generate 20 different random datasets, average results
+	probit      : data generation model
 				  False → logistic model: p = 1/(1+exp(-β^T x))
 				  True  → probit model: p = Φ(β^T x)
-				  Φ: standart normal dağılımın CDF'i (kümülatif dağılım fonksiyonu)
-				  Probit model gerçekte logistic regression uyguladığımızda
-				  ne olur diye test etmek için — model yanlış ama ne kadar başarılı?
+				  Φ: CDF of standard normal distribution
+				  To test what happens when we fit logistic regression to probit data
+				  — model is mis‑specified, but how well does it perform?
 	"""
 	
-	# Toplam değişken sayısı: 10 önemli + n_irrelevant önemsiz
+	# Total number of variables: 10 relevant + n_irrelevant irrelevant
 	p = 10 + n_irrelevant
 	
-	# Gerçek katsayılar:
+	# True coefficients:
 	# β = [1,1,1,1,1,1,1,1,1,1, 0,0,...,0]
-	# İlk 10 değişken önemli (katsayı=1), geri kalanlar önemsiz (katsayı=0)
+	# First 10 variables are relevant (coefficient=1), the rest are irrelevant (coefficient=0)
 	beta = np.array([1]*10 + [0]*n_irrelevant)
 	
-	# Gerçek önemli değişkenlerin indeksleri: 0, 1, 2, ..., 9
+	# Indices of truly relevant variables: 0, 1, 2, ..., 9
 	true_relevant = set(range(10))
 	
-	psr_list = []   # her tekrardaki PSR değerlerini sakla
-	fdr_list = []   # her tekrardaki FDR değerlerini sakla
+	psr_list = []   # store PSR for each repetition
+	fdr_list = []   # store FDR for each repetition
 	
-	for _ in range(L):   # L kez tekrarla (_ : kullanmadığımız döngü değişkeni)
+	for _ in range(L):   # repeat L times (_ : loop variable not used)
 		
-		# Veri üret
-		# np.random.randn(n, p): n×p boyutunda standart normal matris
-		# Her satır bir gözlem (hasta), her sütun bir değişken (gen)
+		# Generate data
+		# np.random.randn(n, p): n×p matrix of standard normal
+		# Each row is an observation (patient), each column a variable (gene)
 		X_sim = np.random.randn(n, p)
 		
-		# Lineer kombinasyon: β^T * x
-		# X_sim @ beta: matris-vektör çarpımı → (n,) vektör
-		# Her gözlem için: β1*x1 + β2*x2 + ... + βp*xp
+		# Linear combination: β^T * x
+		# X_sim @ beta: matrix-vector product → (n,) vector
+		# For each observation: β1*x1 + β2*x2 + ... + βp*xp
 		linear = X_sim @ beta
 		
 		if probit:
 			# Probit model: p_i = Φ(β^T x)
-			# norm.cdf: standart normal dağılımın kümülatif dağılım fonksiyonu
+			# norm.cdf: cumulative distribution function of standard normal
 			# Φ(0) = 0.5, Φ(1) = 0.84, Φ(-1) = 0.16
-			# Logistic yerine probit kullanmak modeli "yanlış" yapar
-			# ama lasso hâlâ değişkenleri bulabilir mi diye test ediyoruz
+			# Using probit instead of logistic makes the model "mis‑specified"
+			# We test whether lasso can still find the variables
 			probs = norm.cdf(linear)
 		else:
 			# Logistic model: p_i = 1/(1+exp(-β^T x))
-			# sigmoid fonksiyonu
+			# sigmoid function
 			probs = 1 / (1 + np.exp(-linear))
 		
-		# Bernoulli örnekleme: her hasta için p_i olasılıkla y=1, 1-p_i olasılıkla y=0
+		# Bernoulli sampling: for each patient, y=1 with probability p_i, y=0 with probability 1-p_i
 		# np.random.binomial(1, probs, n):
-		#   1: tek deneme (Bernoulli)
-		#   probs: her gözlem için başarı olasılığı
-		#   n: kaç gözlem üret
+		#   1: single trial (Bernoulli)
+		#   probs: success probability for each observation
+		#   n: number of observations to generate
 		y_sim = np.random.binomial(1, probs, n)
 		
-		# Lasso ile fit et, cross-validation ile optimal lambda seç
-		# LogisticRegressionCV: farklı C değerlerini dener, cross-validation ile en iyisini seçer
-		# l1_ratios=[1]: tamamen lasso (l1_ratio=1)
-		# np.logspace(-3, 2, 30): 0.001 ile 100 arasında 30 C değeri
+		# Fit lasso with cross-validation to select optimal λ
+		# LogisticRegressionCV: tries different C values, selects best via cross-validation
+		# l1_ratios=[1]: pure lasso (l1_ratio=1)
+		# np.logspace(-3, 2, 30): 30 C values between 0.001 and 100
 		model = LogisticRegressionCV(
-			l1_ratios=[1],                      # lasso: tamamen L1 cezası
+			l1_ratios=[1],                      # lasso: pure L1 penalty
 			solver='saga',
 			Cs=np.logspace(-3, 2, 30),
 			cv=5,
@@ -321,27 +299,25 @@ def run_lasso_simulation(n, n_irrelevant=10, L=20, probit=False):
 		)
 		model.fit(X_sim, y_sim)
 		
-		# Sıfır olmayan katsayıların indeksleri = modelin seçtiği değişkenler
-		# model.coef_[0]: katsayı vektörü (p,)
-		# np.where(...)[0]: koşulu sağlayan indeksler
+		# Indices of non-zero coefficients = variables selected by the model
+		# model.coef_[0]: coefficient vector (p,)
+		# np.where(...)[0]: indices where condition is true
 		selected = set(np.where(model.coef_[0] != 0)[0])
 		
 		psr, fdr = compute_psr_fdr(selected, true_relevant)
 		psr_list.append(psr)
 		fdr_list.append(fdr)
 	
-	# np.mean: listenin ortalaması — L tekrarın ortalama PSR ve FDR'si
+	# np.mean: average over L repetitions
 	return np.mean(psr_list), np.mean(fdr_list)
 
-# =============================================================
-# PSR ve FDR'nin n'ye (örneklem büyüklüğü) bağımlılığı
-# =============================================================
+# PSR and FDR as a function of n (sample size)
 
-# n büyüdükçe ne bekliyoruz?
-# PSR artmalı: daha fazla veri → model gerçek değişkenleri daha iyi bulur
-# FDR azalmalı: daha fazla veri → model yanlış değişken seçmez
+# What do we expect as n increases?
+# PSR should increase: more data → model finds true variables better
+# FDR should decrease: more data → model selects fewer false variables
 
-print("\n=== PSR ve FDR vs n ===")
+print("\n=== PSR and FDR vs n ===")
 n_values = [50, 100, 300, 500, 1000, 2000]
 psr_n = []
 fdr_n = []
@@ -353,25 +329,23 @@ for n in n_values:
 	print(f"n={n:5d}: PSR={psr:.3f}, FDR={fdr:.3f}")
 
 plt.figure(figsize=(10, 5))
-plt.plot(n_values, psr_n, 'b-o', label='PSR (yüksek olmalı)')
-plt.plot(n_values, fdr_n, 'r-o', label='FDR (düşük olmalı)')
-plt.xlabel('n — örneklem büyüklüğü')
-plt.ylabel('Değer (0 ile 1 arası)')
-plt.title('PSR ve FDR vs Örneklem Büyüklüğü\nn arttıkça PSR↑ FDR↓ bekliyoruz')
+plt.plot(n_values, psr_n, 'b-o', label='PSR (should be high)')
+plt.plot(n_values, fdr_n, 'r-o', label='FDR (should be low)')
+plt.xlabel('n — sample size')
+plt.ylabel('Value (0 to 1)')
+plt.title('PSR and FDR vs Sample Size\nExpected: PSR↑ and FDR↓ as n increases')
 plt.legend()
 plt.grid(True)
 plt.show()
 
-# =============================================================
-# PSR ve FDR'nin önemsiz değişken sayısına bağımlılığı
-# =============================================================
+# PSR and FDR as a function of number of irrelevant variables
 
-# n=300 sabit, önemsiz değişken sayısı (k) değişiyor
-# k büyüdükçe ne bekliyoruz?
-# PSR azalabilir: gürültü artar, sinyal gömülür
-# FDR artabilir: model daha fazla yanlış değişken seçer
+# Fix n=300, vary number of irrelevant variables (k)
+# What do we expect as k increases?
+# PSR may decrease: more noise drowns the signal
+# FDR may increase: model selects more false variables
 
-print("\n=== PSR ve FDR vs önemsiz değişken sayısı (n=300) ===")
+print("\n=== PSR and FDR vs number of irrelevant variables (n=300) ===")
 irrelevant_values = [10, 50, 100, 200, 500]
 psr_k = []
 fdr_k = []
@@ -385,31 +359,29 @@ for k in irrelevant_values:
 plt.figure(figsize=(10, 5))
 plt.plot(irrelevant_values, psr_k, 'b-o', label='PSR')
 plt.plot(irrelevant_values, fdr_k, 'r-o', label='FDR')
-plt.xlabel('Önemsiz değişken sayısı (k)')
-plt.ylabel('Değer')
-plt.title('PSR ve FDR vs Önemsiz Değişken Sayısı\nk arttıkça model zorlanır')
+plt.xlabel('Number of irrelevant variables (k)')
+plt.ylabel('Value')
+plt.title('PSR and FDR vs Number of Irrelevant Variables\nModel struggles as k increases')
 plt.legend()
 plt.grid(True)
 plt.show()
 
-# =============================================================
-# LOGİSTİK vs PROBİT KARŞILAŞTIRMASI
-# =============================================================
+# LOGISTIC vs PROBIT COMPARISON
 
-# Probit model: gerçekte p = Φ(β^T x) ile veri üretiyoruz
-# Ama lasso ile logistic regression fit ediyoruz (model yanlış)
-# Soru: yanlış model bile değişkenleri bulabilir mi?
+# Probit model: we generate data with p = Φ(β^T x)
+# Then fit logistic regression with lasso (mis‑specified model)
+# Question: can a wrong model still find the relevant variables?
 
-print("\n=== Logistic vs Probit karşılaştırması (n=300, k=10) ===")
+print("\n=== Logistic vs Probit comparison (n=300, k=10) ===")
 
 psr_log, fdr_log = run_lasso_simulation(
-	n=300, n_irrelevant=10, L=20, probit=False   # doğru model
+	n=300, n_irrelevant=10, L=20, probit=False   # correct model
 )
 psr_pro, fdr_pro = run_lasso_simulation(
-	n=300, n_irrelevant=10, L=20, probit=True    # yanlış model (probit veri, logistic fit)
+	n=300, n_irrelevant=10, L=20, probit=True    # mis‑specified model (probit data, logistic fit)
 )
 
-print(f"Logistic (doğru model) : PSR={psr_log:.3f}, FDR={fdr_log:.3f}")
-print(f"Probit   (yanlış model): PSR={psr_pro:.3f}, FDR={fdr_pro:.3f}")
-print("\nYorum: PSR ve FDR çok farklıysa lasso probit veriye karşı hassas demektir.")
-print("Çok farklı değilse lasso model yanlışlığına karşı robust (sağlam) demektir.")
+print(f"Logistic (correct model) : PSR={psr_log:.3f}, FDR={fdr_log:.3f}")
+print(f"Probit   (wrong model)   : PSR={psr_pro:.3f}, FDR={fdr_pro:.3f}")
+print("\nInterpretation: If PSR and FDR differ substantially, lasso is sensitive to probit data.")
+print("If they are similar, lasso is robust to model mis‑specification.")
